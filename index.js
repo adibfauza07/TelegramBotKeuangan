@@ -133,6 +133,122 @@ bot.command('report', async (ctx) => {
     }
 });
 
+// Command untuk rekap pengeluaran dan pemasukan bulanan per kategori
+bot.command('rekap', async (ctx) => {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        // Ambil bulan dan tahun saat ini
+        const today = new Date();
+        const currentMonth = today.getMonth() + 1; // getMonth() mulai dari 0
+        const currentYear = today.getFullYear();
+
+        // Query Pengeluaran per Kategori (Bulan Ini)
+        const [outRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pengeluaran' 
+             AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [currentMonth, currentYear]
+        );
+
+        // Query Pemasukan per Kategori (Bulan Ini)
+        const [inRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pemasukan' 
+             AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [currentMonth, currentYear]
+        );
+        
+        await connection.end();
+
+        // Fungsi bantuan untuk format Rupiah
+        const formatRp = (angka) => {
+            return new Intl.NumberFormat('id-ID', { 
+                style: 'currency', 
+                currency: 'IDR', 
+                minimumFractionDigits: 0 
+            }).format(angka);
+        };
+
+        // Menyusun Pesan Balasan
+// Menyusun Pesan Balasan menggunakan tag HTML (<b> untuk tebal)
+        let pesan = `📅 <b>Rekap Kategori Bulan Ini (${currentMonth}/${currentYear})</b>\n\n`;
+        
+        pesan += `📉 <b>Rincian Pengeluaran:</b>\n`;
+        if (outRows.length > 0) {
+            outRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ Belum ada pengeluaran.\n`;
+        }
+
+        pesan += `\n📈 <b>Rincian Pemasukan:</b>\n`;
+        if (inRows.length > 0) {
+            inRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ Belum ada pemasukan.\n`;
+        }
+
+        // Ubah parse_mode menjadi HTML
+        ctx.reply(pesan, { parse_mode: 'HTML' });
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan saat menarik data rekap bulanan.');
+    }
+});
+
+// Command untuk menghapus transaksi berdasarkan ID
+// Format: /delete [ID_Transaksi]
+bot.command('delete', async (ctx) => {
+    const message = ctx.message.text;
+    const parts = message.split(' ');
+
+    // Validasi input
+    if (parts.length < 2) {
+        return ctx.reply('Format salah, Bro! Gunakan: /delete [ID_Transaksi]\nContoh: /delete 3');
+    }
+
+    const idTransaksi = parseInt(parts[1]);
+
+    // Pastikan yang diinput adalah angka
+    if (isNaN(idTransaksi)) {
+        return ctx.reply('ID Transaksi harus berupa angka, Bro!');
+    }
+
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        // Eksekusi query DELETE
+        const [result] = await connection.execute(
+            'DELETE FROM transaksi WHERE id = ?',
+            [idTransaksi]
+        );
+        
+        await connection.end();
+
+        // Cek apakah ada baris yang terhapus
+        if (result.affectedRows > 0) {
+            ctx.reply(`✅ Siap! Transaksi dengan ID ${idTransaksi} berhasil dihapus dari database.`);
+        } else {
+            ctx.reply(`⚠️ Hmm, transaksi dengan ID ${idTransaksi} tidak ditemukan. Coba cek lagi ID-nya ya.`);
+        }
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Waduh, terjadi kesalahan sistem saat mencoba menghapus data.');
+    }
+});
+
+
+
 // Menjalankan Bot dengan mode Polling
 bot.launch().then(() => {
     console.log('Bot Telegram sedang berjalan di Localhost...');
