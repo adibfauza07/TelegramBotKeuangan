@@ -140,7 +140,7 @@ bot.command('rekap', async (ctx) => {
         
         // Ambil bulan dan tahun saat ini
         const today = new Date();
-        const currentMonth = today.getMonth() + 1; // getMonth() mulai dari 0
+        const currentMonth = today.getMonth() + 1;
         const currentYear = today.getFullYear();
 
         // Query Pengeluaran per Kategori (Bulan Ini)
@@ -174,8 +174,21 @@ bot.command('rekap', async (ctx) => {
             }).format(angka);
         };
 
-        // Menyusun Pesan Balasan
-// Menyusun Pesan Balasan menggunakan tag HTML (<b> untuk tebal)
+        // --- MENGHITUNG SISA SALDO BULAN INI ---
+        let totalPengeluaran = 0;
+        outRows.forEach(row => {
+            totalPengeluaran += parseFloat(row.total);
+        });
+
+        let totalPemasukan = 0;
+        inRows.forEach(row => {
+            totalPemasukan += parseFloat(row.total);
+        });
+
+        let sisaSaldo = totalPemasukan - totalPengeluaran;
+        // ---------------------------------------
+
+        // Menyusun Pesan Balasan (menggunakan HTML)
         let pesan = `📅 <b>Rekap Kategori Bulan Ini (${currentMonth}/${currentYear})</b>\n\n`;
         
         pesan += `📉 <b>Rincian Pengeluaran:</b>\n`;
@@ -196,7 +209,10 @@ bot.command('rekap', async (ctx) => {
             pesan += `▫️ Belum ada pemasukan.\n`;
         }
 
-        // Ubah parse_mode menjadi HTML
+        // --- MENAMPILKAN SISA SALDO ---
+        pesan += `\n═══════════════════\n`;
+        pesan += `💰 <b>Sisa Saldo Bulan Ini: ${formatRp(sisaSaldo)}</b>`;
+
         ctx.reply(pesan, { parse_mode: 'HTML' });
 
     } catch (error) {
@@ -247,7 +263,85 @@ bot.command('delete', async (ctx) => {
     }
 });
 
+// Command untuk menampilkan grafik Pie Chart pengeluaran bulanan
+bot.command('chart', async (ctx) => {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        const today = new Date();
+        const currentMonth = today.getMonth() + 1;
+        const currentYear = today.getFullYear();
 
+        // Ambil data pengeluaran bulan ini (dikumpulkan per kategori)
+        const [rows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pengeluaran' 
+             AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
+             GROUP BY kategori`,
+            [currentMonth, currentYear]
+        );
+        
+        await connection.end();
+
+        // Validasi jika data kosong
+        if (rows.length === 0) {
+            return ctx.reply('Belum ada data pengeluaran bulan ini untuk dibuatkan grafik, Bro.');
+        }
+
+        // 1. Siapkan Array untuk Label (Kategori) dan Data (Nominal)
+        const labels = [];
+        const dataNominal = [];
+
+        rows.forEach(row => {
+            labels.push(row.kategori);
+            dataNominal.push(parseFloat(row.total));
+        });
+
+        // 2. Susun Konfigurasi Chart.js
+        const chartConfig = {
+            type: 'outlabeledPie', // Tipe pie chart dengan label di luar agar rapi
+            data: {
+                labels: labels,
+                datasets: [{
+                    backgroundColor: [
+                        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#EA3546', '#662E9B'
+                    ],
+                    data: dataNominal
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: false, // Sembunyikan legenda standar
+                    outlabels: {
+                        text: '%l\nRp%v', // Menampilkan Kategori (%l) dan Nilai (%v)
+                        color: 'white',
+                        stretch: 35,
+                        font: { resizable: true, minSize: 12, maxSize: 16 }
+                    }
+                }
+            }
+        };
+
+        // 3. Encode ke URL QuickChart
+        // Tambahkan parameter background putih (&bkg=white) agar tidak transparan di dark mode Telegram
+        const chartUrl = `https://quickchart.io/chart?w=600&h=400&bkg=white&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+
+        // 4. Kirim Gambar menggunakan ctx.replyWithPhoto
+        // Telegraf cukup pintar untuk langsung membaca URL gambar
+        ctx.replyWithPhoto(
+            { url: chartUrl }, 
+            { 
+                caption: `📊 <b>Grafik Pengeluaran Bulan Ini (${currentMonth}/${currentYear})</b>`, 
+                parse_mode: 'HTML' 
+            }
+        );
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan saat mencoba merender grafik.');
+    }
+});
 
 // Menjalankan Bot dengan mode Polling
 bot.launch().then(() => {
