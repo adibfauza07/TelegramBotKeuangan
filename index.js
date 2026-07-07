@@ -296,33 +296,35 @@ bot.hears(['/rekapharian', /🗓️ Rekap Harian/i], async (ctx) => {
 });
 
 // Command untuk rekap pengeluaran dan pemasukan bulanan per kategori
+// Command untuk rekap bulanan (Sudah Support Multi-User)
 bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
+    const userId = ctx.from.id; // Tangkap ID User
+
     try {
         const connection = await mysql.createConnection(dbConfig);
         
-        // Ambil bulan dan tahun saat ini
         const today = new Date();
         const currentMonth = today.getMonth() + 1;
         const currentYear = today.getFullYear();
 
-        // Query Pengeluaran per Kategori (Bulan Ini)
+        // Query Pengeluaran
         const [outRows] = await connection.execute(
             `SELECT kategori, SUM(nominal) as total 
              FROM transaksi 
-             WHERE tipe = 'Pengeluaran' 
+             WHERE tipe = 'Pengeluaran' AND user_id = ? 
              AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
              GROUP BY kategori ORDER BY total DESC`,
-            [currentMonth, currentYear]
+            [userId, currentMonth, currentYear]
         );
 
-        // Query Pemasukan per Kategori (Bulan Ini)
+        // Query Pemasukan
         const [inRows] = await connection.execute(
             `SELECT kategori, SUM(nominal) as total 
              FROM transaksi 
-             WHERE tipe = 'Pemasukan' 
+             WHERE tipe = 'Pemasukan' AND user_id = ? 
              AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
              GROUP BY kategori ORDER BY total DESC`,
-            [currentMonth, currentYear]
+            [userId, currentMonth, currentYear]
         );
         
         await connection.end();
@@ -336,7 +338,7 @@ bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
             }).format(angka);
         };
 
-        // --- MENGHITUNG SISA SALDO BULAN INI ---
+        // Menghitung Sisa Saldo Bulan Ini
         let totalPengeluaran = 0;
         outRows.forEach(row => {
             totalPengeluaran += parseFloat(row.total);
@@ -348,9 +350,8 @@ bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
         });
 
         let sisaSaldo = totalPemasukan - totalPengeluaran;
-        // ---------------------------------------
 
-        // Menyusun Pesan Balasan (menggunakan HTML)
+        // Menyusun Pesan Balasan
         let pesan = `📅 <b>Rekap Kategori Bulan Ini (${currentMonth}/${currentYear})</b>\n\n`;
         
         pesan += `📉 <b>Rincian Pengeluaran:</b>\n`;
@@ -371,7 +372,6 @@ bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
             pesan += `▫️ Belum ada pemasukan.\n`;
         }
 
-        // --- MENAMPILKAN SISA SALDO ---
         pesan += `\n═══════════════════\n`;
         pesan += `💰 <b>Sisa Saldo Bulan Ini: ${formatRp(sisaSaldo)}</b>`;
 
@@ -582,6 +582,7 @@ bot.command('menu', (ctx) => {
 
 // Saat tombol "Rekap Bulanan" ditekan
 // Command untuk rekap bulanan (Sudah Support Multi-User)
+// Command untuk rekap bulanan (Sudah Support Multi-User)
 bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
     // 1. Tangkap ID Telegram unik milik user yang sedang mengeklik tombol
     const userId = ctx.from.id; 
@@ -675,6 +676,11 @@ bot.action('btn_chart', async (ctx) => {
     await ctx.answerCbQuery(); 
     const userId = ctx.from.id;
     ctx.reply('Fitur grafik sedang diproses...');
+});
+
+// Command untuk cek ID Asli
+bot.command('cekid', (ctx) => {
+    ctx.reply(`🆔 ID Akun Telegram ini adalah: ${ctx.from.id}`);
 });
 
 // Command untuk menghapus SEMUA data milik user tersebut (Reset Total)
