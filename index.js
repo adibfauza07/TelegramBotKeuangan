@@ -1,9 +1,28 @@
 require('dotenv').config();
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const mysql = require('mysql2/promise');
 
 // Inisiasi Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Command bawaan saat pertama kali chat bot atau ketik /start
+// Command bawaan saat pertama kali chat bot atau ketik /start
+bot.start((ctx) => {
+    let pesan = `Halo, Bro! 🤖\nSaya adalah Bot Asisten Keuangan Pribadimu.\n\n`;
+    pesan += `Silakan gunakan tombol menu di bawah ini untuk bernavigasi:`;
+
+    // Mengirim pesan beserta Custom Reply Keyboard dengan Label Baru
+   // Mengirim pesan beserta Custom Reply Keyboard
+    ctx.reply(pesan, 
+        Markup.keyboard([
+            ['💰 Pemasukan', '💸 Pengeluaran'],
+            ['🗓️ Rekap Harian', '📅 Rekap Bulanan'], // <--- Tambah di sini
+            ['📝 Riwayat Transaksi', '📊 Laporan Saldo'],
+            ['📈 Grafik Pengeluaran', '❌ Hapus Transaksi']
+        ])
+        .resize() 
+    );
+});
 
 // Konfigurasi Koneksi Database MySQL
 const dbConfig = {
@@ -15,8 +34,8 @@ const dbConfig = {
 
 // Command untuk mencatat pengeluaran
 // Format ketik di Telegram: /out Makanan 50000 Makan siang
+// Command untuk mencatat pengeluaran
 bot.command('out', async (ctx) => {
-    // Parsing pesan text
     const message = ctx.message.text;
     const parts = message.split(' ');
 
@@ -26,55 +45,26 @@ bot.command('out', async (ctx) => {
 
     const kategori = parts[1];
     const nominal = parseFloat(parts[2]);
-    const keterangan = parts.slice(3).join(' '); // Menggabungkan sisa kata menjadi keterangan
-    const tanggal = new Date().toISOString().split('T')[0]; // Mendapatkan YYYY-MM-DD hari ini
-
-    try {
-        // Membuka koneksi ke database
-        const connection = await mysql.createConnection(dbConfig);
-        
-        // Query Insert Data
-        const [result] = await connection.execute(
-            'INSERT INTO transaksi (tanggal, tipe, kategori, nominal, keterangan) VALUES (?, ?, ?, ?, ?)',
-            [tanggal, 'Pengeluaran', kategori, nominal, keterangan]
-        );
-        
-        await connection.end();
-
-        // Balasan sukses
-        ctx.reply(`✅ Pengeluaran berhasil dicatat!\n\nKategori: ${kategori}\nNominal: Rp${nominal}\nKeterangan: ${keterangan}`);
-    } catch (error) {
-        console.error(error);
-        ctx.reply('❌ Terjadi kesalahan saat menyimpan ke database.');
-    }
-});
-
-// Command untuk mencatat pemasukan
-// Format: /in [Kategori] [Nominal] [Keterangan]
-bot.command('in', async (ctx) => {
-    const message = ctx.message.text;
-    const parts = message.split(' ');
-
-    // Validasi jumlah parameter
-    if (parts.length < 4) {
-        return ctx.reply('Format salah! Gunakan: /in [Kategori] [Nominal] [Keterangan]\nContoh: /in Gaji 10000000 Gaji Bulanan');
-    }
-
-    const kategori = parts[1];
-    const nominal = parseFloat(parts[2]);
     const keterangan = parts.slice(3).join(' '); 
-    const tanggal = new Date().toISOString().split('T')[0]; 
+    const waktuSekarang = new Date();
+    const tanggalSQL = waktuSekarang.toISOString().split('T')[0]; 
+    const userId = ctx.from.id; // Menangkap ID Telegram user
 
     try {
-        // Eksekusi query ke database
         const connection = await mysql.createConnection(dbConfig);
-        await connection.execute(
-            'INSERT INTO transaksi (tanggal, tipe, kategori, nominal, keterangan) VALUES (?, ?, ?, ?, ?)',
-            [tanggal, 'Pemasukan', kategori, nominal, keterangan]
+        // Simpan hasil eksekusi ke dalam variabel result untuk mengambil ID
+        const [result] = await connection.execute(
+            'INSERT INTO transaksi (user_id, tanggal, tipe, kategori, nominal, keterangan) VALUES (?, ?, ?, ?, ?, ?)',
+            [userId, tanggalSQL, 'Pengeluaran', kategori, nominal, keterangan]
         );
         await connection.end();
 
-        // Format nominal ke bentuk Rupiah (contoh: Rp10.000.000)
+        // Mengambil ID yang baru saja digenerate oleh MySQL
+        const idTransaksi = result.insertId;
+        
+        // Format waktu ke format lokal Indonesia (WIB)
+        const waktuFormat = waktuSekarang.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+
         const formatter = new Intl.NumberFormat('id-ID', {
             style: 'currency',
             currency: 'IDR',
@@ -82,8 +72,91 @@ bot.command('in', async (ctx) => {
         });
         const nominalRupiah = formatter.format(nominal);
 
-        // Balasan sukses
-        ctx.reply(`✅ Pemasukan berhasil dicatat!\n\nKategori: ${kategori}\nNominal: ${nominalRupiah}\nKeterangan: ${keterangan}`);
+        // Susunan balasan menggunakan HTML
+        let pesan = `✅ <b>Pengeluaran berhasil dicatat!</b>\n\n`;
+        pesan += `🆔 <b>ID Transaksi:</b> ${idTransaksi}\n`;
+        pesan += `⏰ <b>Waktu Input:</b> ${waktuFormat} WIB\n`;
+        pesan += `📁 <b>Kategori:</b> ${kategori}\n`;
+        pesan += `💸 <b>Nominal:</b> ${nominalRupiah}\n`;
+        pesan += `📝 <b>Keterangan:</b> ${keterangan}`;
+
+        ctx.reply(pesan, { parse_mode: 'HTML' });
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan saat menyimpan data ke database.');
+    }
+});
+
+// Listener menggunakan Regex (/.../i) agar kebal terhadap perbedaan Unicode Emoji
+// Listener untuk tombol Bantuan Input (Sertakan Emojinya agar spesifik!)
+bot.hears(/💰 Pemasukan/i, (ctx) => {
+    ctx.reply('Gunakan format perintah ini untuk mencatat Pemasukan baru:\n\n👉 /in [Kategori] [Nominal] [Keterangan]\nContoh: /in Gaji 10000000 Gaji Pokok');
+});
+
+bot.hears(/💸 Pengeluaran/i, (ctx) => {
+    ctx.reply('Gunakan format perintah ini untuk mencatat Pengeluaran baru:\n\n👉 /out [Kategori] [Nominal] [Keterangan]\nContoh: /out Makan 50000 Naspad');
+});
+
+// Listener untuk tombol Hapus Transaksi
+bot.hears(/❌ Hapus Transaksi/i, (ctx) => {
+    let balas = `Untuk menghapus data yang salah, pastikan kamu mengecek ID Transaksinya terlebih dahulu di menu <b>📝 Riwayat Transaksi</b>.\n\n`;
+    balas += `Setelah tahu ID-nya, ketik perintah ini:\n`;
+    balas += `👉 <b>/delete [ID]</b>\n\n`;
+    balas += `Contoh: <code>/delete 3</code>`;
+    
+    ctx.reply(balas, { parse_mode: 'HTML' });
+});
+
+
+
+// Command untuk mencatat pemasukan
+// Format: /in [Kategori] [Nominal] [Keterangan]
+// Command untuk mencatat pemasukan
+bot.command('in', async (ctx) => {
+    const message = ctx.message.text;
+    const parts = message.split(' ');
+
+    if (parts.length < 4) {
+        return ctx.reply('Format salah! Gunakan: /in [Kategori] [Nominal] [Keterangan]\nContoh: /in Gaji 10000000 Gaji Bulanan');
+    }
+
+    const kategori = parts[1];
+    const nominal = parseFloat(parts[2]);
+    const keterangan = parts.slice(3).join(' '); 
+    const waktuSekarang = new Date();
+    const tanggalSQL = waktuSekarang.toISOString().split('T')[0]; 
+    const userId = ctx.from.id; // Menangkap ID Telegram user
+
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const [result] = await connection.execute(
+            'INSERT INTO transaksi (user_id, tanggal, tipe, kategori, nominal, keterangan) VALUES (?, ?, ?, ?, ?, ?)',
+            [userId, tanggalSQL, 'Pemasukan', kategori, nominal, keterangan]
+        );
+        await connection.end();
+
+        // Mengambil ID yang baru saja digenerate oleh MySQL
+        const idTransaksi = result.insertId;
+        
+        // Format waktu ke format lokal Indonesia (WIB)
+        const waktuFormat = waktuSekarang.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+
+        const formatter = new Intl.NumberFormat('id-ID', {
+            style: 'currency',
+            currency: 'IDR',
+            minimumFractionDigits: 0
+        });
+        const nominalRupiah = formatter.format(nominal);
+
+        // Susunan balasan menggunakan HTML
+        let pesan = `✅ <b>Pemasukan berhasil dicatat!</b>\n\n`;
+        pesan += `🆔 <b>ID Transaksi:</b> ${idTransaksi}\n`;
+        pesan += `⏰ <b>Waktu Input:</b> ${waktuFormat} WIB\n`;
+        pesan += `📁 <b>Kategori:</b> ${kategori}\n`;
+        pesan += `💰 <b>Nominal:</b> ${nominalRupiah}\n`;
+        pesan += `📝 <b>Keterangan:</b> ${keterangan}`;
+
+        ctx.reply(pesan, { parse_mode: 'HTML' });
     } catch (error) {
         console.error(error);
         ctx.reply('❌ Terjadi kesalahan saat menyimpan data Pemasukan ke database.');
@@ -91,19 +164,21 @@ bot.command('in', async (ctx) => {
 });
 
 // Command untuk melihat laporan / saldo
-bot.command('report', async (ctx) => {
+bot.hears(['/report', /📊 Laporan Saldo/i], async (ctx) => {
     try {
         const connection = await mysql.createConnection(dbConfig);
-        
+        const userId = ctx.from.id;
         // Query untuk menghitung total pemasukan
         const [inResult] = await connection.execute(
-            "SELECT SUM(nominal) as total_in FROM transaksi WHERE tipe = 'Pemasukan'"
+            "SELECT SUM(nominal) as total_in FROM transaksi WHERE tipe = 'Pemasukan' AND user_id = ?",
+            [userId]
         );
         const totalIn = inResult[0].total_in || 0;
 
         // Query untuk menghitung total pengeluaran
         const [outResult] = await connection.execute(
-            "SELECT SUM(nominal) as total_out FROM transaksi WHERE tipe = 'Pengeluaran'"
+            "SELECT SUM(nominal) as total_out FROM transaksi WHERE tipe = 'Pengeluaran' AND user_id = ?",
+            [userId]
         );
         const totalOut = outResult[0].total_out || 0;
 
@@ -133,8 +208,95 @@ bot.command('report', async (ctx) => {
     }
 });
 
+// Command untuk rekap harian
+bot.hears(['/rekapharian', /🗓️ Rekap Harian/i], async (ctx) => {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        // Ambil tanggal hari ini untuk mencocokkan dengan database
+        const waktuSekarang = new Date();
+        const hariIniSQL = waktuSekarang.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+        
+        // Format tanggal untuk ditampilkan di Telegram (DD/MM/YYYY)
+        const formatTanggal = waktuSekarang.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' });
+
+        // Query Pengeluaran Hari Ini
+        const [outRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pengeluaran' AND tanggal = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [hariIniSQL]
+        );
+
+        // Query Pemasukan Hari Ini
+        const [inRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pemasukan' AND tanggal = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [hariIniSQL]
+        );
+        
+        await connection.end();
+
+        // Fungsi bantuan untuk format Rupiah
+        const formatRp = (angka) => {
+            return new Intl.NumberFormat('id-ID', { 
+                style: 'currency', 
+                currency: 'IDR', 
+                minimumFractionDigits: 0 
+            }).format(angka);
+        };
+
+        // Menghitung selisih (Saldo Hari Ini)
+        let totalPengeluaran = 0;
+        outRows.forEach(row => {
+            totalPengeluaran += parseFloat(row.total);
+        });
+
+        let totalPemasukan = 0;
+        inRows.forEach(row => {
+            totalPemasukan += parseFloat(row.total);
+        });
+
+        let selisihHariIni = totalPemasukan - totalPengeluaran;
+
+        // Menyusun Pesan Balasan menggunakan HTML
+        let pesan = `🗓️ <b>Rekap Hari Ini (${formatTanggal})</b>\n\n`;
+        
+        pesan += `📉 <b>Pengeluaran:</b>\n`;
+        if (outRows.length > 0) {
+            outRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ <i>Belum ada pengeluaran hari ini.</i>\n`;
+        }
+
+        pesan += `\n📈 <b>Pemasukan:</b>\n`;
+        if (inRows.length > 0) {
+            inRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ <i>Belum ada pemasukan hari ini.</i>\n`;
+        }
+
+        // Menampilkan Selisih Hari Ini
+        pesan += `\n═══════════════════\n`;
+        pesan += `⚖️ <b>Selisih Hari Ini: ${formatRp(selisihHariIni)}</b>`;
+
+        ctx.reply(pesan, { parse_mode: 'HTML' });
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan saat menarik data rekap harian.');
+    }
+});
+
 // Command untuk rekap pengeluaran dan pemasukan bulanan per kategori
-bot.command('rekap', async (ctx) => {
+bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
     try {
         const connection = await mysql.createConnection(dbConfig);
         
@@ -221,6 +383,57 @@ bot.command('rekap', async (ctx) => {
     }
 });
 
+// Command untuk melihat 5 transaksi terakhir
+bot.hears(['/history', /📝 Riwayat Transaksi/i], async (ctx) => {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const userId = ctx.from.id;
+        // Ambil 5 data terakhir berdasarkan ID terbesar (terbaru)
+        const [rows] = await connection.execute(
+            'SELECT id, tanggal, tipe, kategori, nominal, keterangan FROM transaksi WHERE user_id = ? ORDER BY id DESC LIMIT 5',
+            [userId]
+        );
+        
+        await connection.end();
+
+        // Cek jika database masih kosong
+        if (rows.length === 0) {
+            return ctx.reply('Belum ada data transaksi yang tercatat, Bro.');
+        }
+
+        // Fungsi bantuan untuk format Rupiah
+        const formatRp = (angka) => {
+            return new Intl.NumberFormat('id-ID', { 
+                style: 'currency', 
+                currency: 'IDR', 
+                minimumFractionDigits: 0 
+            }).format(angka);
+        };
+
+        // Menyusun Pesan Balasan dengan HTML
+        let pesan = `📝 <b>5 Transaksi Terakhir:</b>\n\n`;
+        
+        rows.forEach(row => {
+            const tgl = new Date(row.tanggal).toLocaleDateString('id-ID');
+            const icon = row.tipe === 'Pemasukan' ? '🟢' : '🔴';
+            
+            pesan += `${icon} <b>ID: ${row.id}</b> | ${tgl}\n`;
+            pesan += `Kategori: ${row.kategori}\n`;
+            pesan += `Nominal: ${formatRp(row.nominal)}\n`;
+            pesan += `Ket: ${row.keterangan}\n`;
+            pesan += `-------------------------\n`;
+        });
+
+        pesan += `\n💡 <i>Ketik /delete [ID] untuk menghapus transaksi yang salah.</i>`;
+
+        ctx.reply(pesan, { parse_mode: 'HTML' });
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Waduh, terjadi kesalahan sistem saat mengambil riwayat transaksi.');
+    }
+});
+
 // Command untuk menghapus transaksi berdasarkan ID
 // Format: /delete [ID_Transaksi]
 bot.command('delete', async (ctx) => {
@@ -244,8 +457,8 @@ bot.command('delete', async (ctx) => {
         
         // Eksekusi query DELETE
         const [result] = await connection.execute(
-            'DELETE FROM transaksi WHERE id = ?',
-            [idTransaksi]
+            'DELETE FROM transaksi WHERE id = ? AND user_id = ?',
+            [idTransaksi, userId]
         );
         
         await connection.end();
@@ -264,7 +477,7 @@ bot.command('delete', async (ctx) => {
 });
 
 // Command untuk menampilkan grafik Pie Chart pengeluaran bulanan
-bot.command('chart', async (ctx) => {
+bot.hears(['/chart', /📈 Grafik Pengeluaran/i], async (ctx) => {
     try {
         const connection = await mysql.createConnection(dbConfig);
         
@@ -276,10 +489,10 @@ bot.command('chart', async (ctx) => {
         const [rows] = await connection.execute(
             `SELECT kategori, SUM(nominal) as total 
              FROM transaksi 
-             WHERE tipe = 'Pengeluaran' 
+             WHERE tipe = 'Pengeluaran' AND user_id = ?
              AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
              GROUP BY kategori`,
-            [currentMonth, currentYear]
+            [userId, currentMonth, currentYear]
         );
         
         await connection.end();
@@ -323,23 +536,176 @@ bot.command('chart', async (ctx) => {
             }
         };
 
-        // 3. Encode ke URL QuickChart
-        // Tambahkan parameter background putih (&bkg=white) agar tidak transparan di dark mode Telegram
+       // 3. Encode ke URL QuickChart
         const chartUrl = `https://quickchart.io/chart?w=600&h=400&bkg=white&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
 
-        // 4. Kirim Gambar menggunakan ctx.replyWithPhoto
-        // Telegraf cukup pintar untuk langsung membaca URL gambar
-        ctx.replyWithPhoto(
-            { url: chartUrl }, 
-            { 
-                caption: `📊 <b>Grafik Pengeluaran Bulan Ini (${currentMonth}/${currentYear})</b>`, 
-                parse_mode: 'HTML' 
-            }
-        );
-
+        // 4. Kirim sebagai teks HTML dengan link tersembunyi untuk memancing URL Preview Telegram
+        const pesan = `📊 <b>Grafik Pengeluaran Bulan Ini (${currentMonth}/${currentYear})</b>\n<a href="${chartUrl}">&#8205;</a>`;
+        
+        ctx.reply(pesan, { parse_mode: 'HTML' });
     } catch (error) {
         console.error(error);
         ctx.reply('❌ Terjadi kesalahan saat mencoba merender grafik.');
+    }
+});
+
+// Mengatur Menu Command (Hamburger Menu)
+bot.telegram.setMyCommands([
+    { command: 'start', description: 'Lihat daftar perintah bot' },
+    { command: 'in', description: 'Catat Pemasukan Baru' },
+    { command: 'out', description: 'Catat Pengeluaran Baru' },
+    { command: 'report', description: 'Lihat Total Saldo' },
+    { command: 'rekap', description: 'Lihat Rekap Kategori Bulan Ini' },
+    { command: 'history', description: 'Lihat 5 Transaksi Terakhir' },
+    { command: 'chart', description: 'Lihat Grafik Pengeluaran' }
+]);
+
+// Command untuk memunculkan tombol interaktif
+bot.command('menu', (ctx) => {
+    ctx.reply('Pilih aksi cepat di bawah ini, Bro:',
+        Markup.inlineKeyboard([
+            // Baris pertama (2 tombol)
+            [
+                Markup.button.callback('🟢 Pemasukan', 'btn_in'),
+                Markup.button.callback('🔴 Pengeluaran', 'btn_out')
+            ],
+            // Baris kedua (2 tombol)
+            [
+                Markup.button.callback('📊 Rekap Bulanan', 'btn_rekap'),
+                Markup.button.callback('📈 Lihat Grafik', 'btn_chart')
+            ]
+        ])
+    );
+});
+
+// --- CARA MENANGANI SAAT TOMBOL DITEKAN ---
+
+// Saat tombol "Rekap Bulanan" ditekan
+// Command untuk rekap bulanan (Sudah Support Multi-User)
+bot.hears(['/rekap', /📅 Rekap Bulanan/i], async (ctx) => {
+    // 1. Tangkap ID Telegram unik milik user yang sedang mengeklik tombol
+    const userId = ctx.from.id; 
+
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        const today = new Date();
+        const currentMonth = today.getMonth() + 1;
+        const currentYear = today.getFullYear();
+
+        // 2. Query Pengeluaran (Difilter HANYA untuk user_id ini)
+        const [outRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pengeluaran' AND user_id = ? 
+             AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [userId, currentMonth, currentYear]
+        );
+
+        // 3. Query Pemasukan (Difilter HANYA untuk user_id ini) -> Ini yang sebelumnya terlewat!
+        const [inRows] = await connection.execute(
+            `SELECT kategori, SUM(nominal) as total 
+             FROM transaksi 
+             WHERE tipe = 'Pemasukan' AND user_id = ? 
+             AND MONTH(tanggal) = ? AND YEAR(tanggal) = ? 
+             GROUP BY kategori ORDER BY total DESC`,
+            [userId, currentMonth, currentYear]
+        );
+        
+        await connection.end();
+
+        // Fungsi bantuan untuk format Rupiah
+        const formatRp = (angka) => {
+            return new Intl.NumberFormat('id-ID', { 
+                style: 'currency', 
+                currency: 'IDR', 
+                minimumFractionDigits: 0 
+            }).format(angka);
+        };
+
+        // Menghitung Sisa Saldo Bulan Ini
+        let totalPengeluaran = 0;
+        outRows.forEach(row => {
+            totalPengeluaran += parseFloat(row.total);
+        });
+
+        let totalPemasukan = 0;
+        inRows.forEach(row => {
+            totalPemasukan += parseFloat(row.total);
+        });
+
+        let sisaSaldo = totalPemasukan - totalPengeluaran;
+
+        // Menyusun Pesan Balasan menggunakan HTML
+        let pesan = `📅 <b>Rekap Kategori Bulan Ini (${currentMonth}/${currentYear})</b>\n\n`;
+        
+        pesan += `📉 <b>Rincian Pengeluaran:</b>\n`;
+        if (outRows.length > 0) {
+            outRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ Belum ada pengeluaran.\n`;
+        }
+
+        pesan += `\n📈 <b>Rincian Pemasukan:</b>\n`;
+        if (inRows.length > 0) {
+            inRows.forEach(row => {
+                pesan += `▫️ ${row.kategori}: ${formatRp(row.total)}\n`;
+            });
+        } else {
+            pesan += `▫️ Belum ada pemasukan.\n`;
+        }
+
+        // Menampilkan Sisa Saldo
+        pesan += `\n═══════════════════\n`;
+        pesan += `💰 <b>Sisa Saldo Bulan Ini: ${formatRp(sisaSaldo)}</b>`;
+
+        ctx.reply(pesan, { parse_mode: 'HTML' });
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan saat menarik data rekap bulanan.');
+    }
+});
+
+// Saat tombol "Lihat Grafik" ditekan
+bot.action('btn_chart', async (ctx) => {
+    await ctx.answerCbQuery(); 
+    const userId = ctx.from.id;
+    ctx.reply('Fitur grafik sedang diproses...');
+});
+
+// Command untuk menghapus SEMUA data milik user tersebut (Reset Total)
+bot.command('reset', async (ctx) => {
+    const userId = ctx.from.id;
+
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        
+        // Menghapus HANYA data yang memiliki user_id milik pengirim pesan
+        const [result] = await connection.execute(
+            'DELETE FROM transaksi WHERE user_id = ?',
+            [userId]
+        );
+        
+        await connection.end();
+
+        // Mengecek apakah ada data yang berhasil dihapus
+        if (result.affectedRows > 0) {
+            let pesan = `✅ <b>Reset Berhasil!</b>\n\n`;
+            pesan += `Sebanyak <b>${result.affectedRows}</b> data transaksimu telah dihapus secara permanen.\n`;
+            pesan += `Mari mulai pencatatan dari awal lagi, Bro! 🚀`;
+            
+            ctx.reply(pesan, { parse_mode: 'HTML' });
+        } else {
+            ctx.reply('⚠️ <b>Data Kosong!</b>\nTidak ada data yang bisa dihapus. Brankas keuanganmu memang sudah bersih, Bro.', { parse_mode: 'HTML' });
+        }
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ Terjadi kesalahan sistem saat mencoba mereset data.');
     }
 });
 
